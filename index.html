@@ -1,0 +1,166 @@
+
+
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>Mobile Shop Manager</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--bg:#eeebe4;--c:#faf8f4;--tx:#0a0a0a;--mu:#6b675f;--bd:#d9d4c8;--on:#f4f1ea;--ok:#1f7a3d;--bad:#b3261e;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#0a0a0a;--c:#161616;--tx:#f4f1ea;--mu:#a09b90;--bd:#2c2c2c;--on:#0a0a0a;--ok:#4ade80;--bad:#f87171;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+#root{max-width:1024px;margin:auto;padding:12px}.card{background:var(--c);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:12px}
+.mu{color:var(--mu);font-size:12px}.ok{color:var(--ok)}.bad{color:var(--bad)}.big{font-size:18px;font-weight:700}
+.b,.b2{border-radius:8px;padding:7px 12px;font:inherit;font-weight:600;cursor:pointer;border:1px solid var(--bd);color:var(--tx);background:none}.b{background:var(--tx);color:var(--on)}.b:disabled{opacity:.5}.b2{font-weight:400;padding:5px 9px}
+input,select{background:var(--c);border:1px solid var(--bd);border-radius:8px;padding:8px 10px;color:var(--tx);font:inherit}.w{width:100%;margin:4px 0}
+label{display:block;margin-top:8px;font-size:12px;color:var(--mu)}.row{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:4px 0;flex-wrap:wrap}
+.g{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}.pg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.pg .card{text-align:left;margin:0;cursor:pointer;color:var(--tx)}.pg .card:disabled{opacity:.4}
+@media(max-width:700px){.g{grid-template-columns:1fr 1fr}.g2{grid-template-columns:1fr!important}}
+nav{display:flex;gap:4px;overflow-x:auto;margin-bottom:12px}.tab{padding:8px 12px;border-radius:8px;white-space:nowrap;border:0;background:none;color:var(--tx);font:inherit;cursor:pointer}.tab.on{background:var(--tx);color:var(--on)}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse}th{text-align:left;color:var(--mu);font-weight:500;padding:6px 8px;white-space:nowrap}td{padding:8px;border-top:1px solid var(--bd)}
+.ov{position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:50;padding:12px}
+#msg{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#0a0a0a;color:#f4f1ea;padding:10px 16px;border-radius:10px;z-index:60;max-width:90%;text-align:center;display:none}
+.lab{width:200px;background:#fff;color:#000;text-align:center;padding:8px;border:1px solid #ccc;border-radius:8px}
+@media print{.np{display:none!important}body{background:#fff}.card{border:0}}
+</style></head><body><div id="root"></div><div id="msg"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+<script>
+// ====== 1) PASTE YOUR SUPABASE VALUES (Project Settings > API) ======
+const SB_URL='PASTE_PROJECT_URL',SB_KEY='PASTE_ANON_KEY';
+const SHOP='Nexora Mobile Shop',ADDR='Gujranwala';
+// ====================================================================
+const $=i=>document.getElementById(i),RK={cashier:1,manager:2,admin:3};
+const h=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const R=n=>'Rs. '+Math.round(+n||0).toLocaleString('en-PK');
+const fd=d=>new Date(d).toLocaleString('en-PK',{dateStyle:'medium',timeStyle:'short'});
+const T={dash:['Dashboard','manager'],pos:['POS','cashier'],prod:['Products','manager'],dev:['Phones (IMEI)','cashier'],cust:['Customers','cashier'],sales:['Sales','cashier'],fin:['Finance & Cash','manager'],ret:['Returns','manager'],bar:['Barcodes','manager'],reo:['Reorder','manager'],adm:['Admin','admin']};
+let sb,me,cur='pos',P=[],DV=[],C=[],cart=[],q='',paid='',cust=0,inv=null,atab='ov',rs={},rno='',rrea='',sel={},fper='day',busy=0;
+const can=r=>RK[me.role]>=RK[r];
+function msg(t){const m=$('msg');m.textContent=t;m.style.display='block';clearTimeout(m._t);m._t=setTimeout(()=>m.style.display='none',5000)}
+const ERR={23505:'That SKU, IMEI or barcode already exists.',23514:'A value is not allowed (negative or wrong format).','42501':'You do not have permission for that.'};
+async function db(p){const r=await p;if(r.error){msg(ERR[r.error.code]||r.error.message);throw r.error}return r.data}
+const rpc=(f,a)=>db(sb.rpc(f,a||{}));
+const tbl=(hd,rows)=>!rows.length?'<div class="mu" style="padding:12px">Nothing here yet.</div>':`<div class="tw"><table><tr>${hd.map(x=>`<th>${x}</th>`).join('')}</tr>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</table></div>`;
+const st=(l,v,c='')=>`<div class="card" style="margin:0"><div class="mu">${l}</div><div class="big ${c}">${v}</div></div>`;
+const stk=p=>p.type=='phone'?DV.filter(d=>d.product_id==p.id).length:p.stock;
+const luhn=s=>{let t=0;for(let i=0;i<15;i++){let d=+s[14-i];if(i%2){d*=2;if(d>9)d-=9}t+=d}return t%10==0};
+const from=()=>{const d=new Date();d.setHours(0,0,0,0);if(fper=='month')d.setDate(1);if(fper=='all')return new Date(2000,0,1).toISOString();return d.toISOString()};
+
+function ask(title,F,cb){const o=document.createElement('div');o.className='ov';
+o.innerHTML=`<form class="card" style="width:100%;max-width:420px;max-height:90vh;overflow:auto"><b>${h(title)}</b>${F.map(f=>`<label>${h(f.l)}${f.t=='select'?`<select name="${f.k}" class="w">${f.o.map(x=>`<option value="${h(x[0])}" ${x[0]==f.v?'selected':''}>${h(x[1])}</option>`).join('')}</select>`:`<input name="${f.k}" type="${f.t||'text'}" step="any" ${f.min!=null?'min="'+f.min+'"':''} value="${h(f.v??'')}" class="w" ${f.r?'required':''}>`}</label>`).join('')}<div class="row" style="margin-top:12px"><button class="b">Save</button><button type="button" class="b2" id="cx">Cancel</button></div></form>`;
+document.body.appendChild(o);o.querySelector('#cx').onclick=()=>o.remove();
+o.querySelector('form').onsubmit=async e=>{e.preventDefault();const v=Object.fromEntries(new FormData(e.target));try{const er=await cb(v);if(er)msg(er);else{o.remove();render()}}catch(x){}}}
+
+// ---------- auth ----------
+function authView(note){$('root').innerHTML=`<div class="card" style="max-width:380px;margin:60px auto"><div class="big">📱 ${h(SHOP)}</div><div class="mu">Mobile Shop Manager</div>${note?`<p>${note}</p>`:''}<label>Email<input id="em" type="email" class="w"></label><label>Password (6+ characters)<input id="pw" type="password" class="w"></label><div class="row" style="margin-top:12px"><button class="b" onclick="auth(0)">Sign in</button><button class="b2" onclick="auth(1)">Create account</button></div><div class="mu" style="margin-top:8px">The first account created becomes the admin. Others need admin approval.</div></div>`}
+async function auth(up){const e=$('em').value.trim(),p=$('pw').value;if(!e||p.length<6)return msg('Enter email and a 6+ character password.');
+const r=up?await sb.auth.signUp({email:e,password:p}):await sb.auth.signInWithPassword({email:e,password:p});if(r.error)return msg(r.error.message);
+if(up&&!r.data.session)return msg('Account created. Confirm your email (if enabled in Supabase), then sign in.');boot()}
+async function boot(){const{data:{session}}=await sb.auth.getSession();if(!session)return authView();
+const{data}=await sb.from('profiles').select('*').eq('id',session.user.id).maybeSingle();me=data;
+if(!me)return authView('Profile not found. Run schema.sql first.');
+if(!me.active)return authView('Your account is waiting for admin approval. <a href="#" onclick="out();return false">Sign out</a>');
+cur=can('manager')?'dash':'pos';render()}
+async function out(){await sb.auth.signOut();location.reload()}
+
+// ---------- shell ----------
+async function render(){try{await loadBase();const body=inv?await invoice():await PG[cur]();
+$('root').innerHTML=`<div class="row np"><div class="big">📱 ${h(SHOP)}</div><span class="mu">${h(me.email)} · ${me.role} · <a href="#" onclick="out();return false">Sign out</a></span></div>
+<nav class="np">${Object.entries(T).filter(([k,v])=>can(v[1])).map(([k,v])=>`<button class="tab ${cur==k?'on':''}" onclick="go('${k}')">${v[0]}</button>`).join('')}</nav><main>${body}</main>`;
+if(cur=='pos'&&!inv){drawRes();drawCart()}
+document.querySelectorAll('svg.jb').forEach(e=>JsBarcode(e,e.dataset.c,{format:'CODE128',height:34,width:1.4,margin:0,fontSize:11}))}catch(e){console.error(e)}}
+const go=p=>{cur=p;inv=null;render()};
+async function loadBase(){[P,DV,C]=await Promise.all([db(sb.from('products').select('*').eq('active',true).order('name')),db(sb.from('devices').select('id,product_id,imei,color').eq('status','in_stock')),db(sb.from('customers').select('*').order('name'))]);if(!cust)cust=C.find(c=>c.is_walkin).id}
+
+// ---------- pages ----------
+const PG={};
+PG.dash=async()=>{const s=await rpc('summary',{p_from:new Date(new Date().setHours(0,0,0,0)).toISOString()}),low=P.filter(p=>stk(p)<=p.min_stock),rc=await db(sb.from('sales').select('id,no,total,customers(name)').order('id',{ascending:false}).limit(5));
+return `<div class="g">${st('Net sales today',R(s.gross-s.returns),'ok')}${st('Invoices today',s.sales)}${st('Units in stock',s.units)}${st('Receivables',R(s.receivables),'bad')}${st('Stock value (cost)',R(s.stock_cost))}${st('Stock value (retail)',R(s.stock_retail))}${st('Active products',P.length)}${st('Low / out of stock',low.length)}</div>
+<div class="g2"><div class="card"><b>Low / out of stock</b>${tbl(['Product','Stock','Min'],low.map(p=>[h(p.name),stk(p)||'<span class="bad">Out</span>',p.min_stock]))}</div><div class="card"><b>Recent sales</b>${tbl(['Invoice','Customer','Total'],rc.map(s=>[`<a href="#" onclick="inv=${s.id};render();return false">${h(s.no)}</a>`,h(s.customers.name),R(s.total)]))}</div></div>`};
+
+PG.pos=()=>`<div class="g2" style="grid-template-columns:3fr 2fr"><div class="card"><input id="s" class="w" placeholder="Search name, SKU, barcode or IMEI (Enter to add)" value="${h(q)}" oninput="q=this.value;drawRes()" onkeydown="if(event.key=='Enter')scan()"><div id="res"></div></div><div class="card" id="cart"></div></div>`;
+function drawRes(){const s=q.trim().toLowerCase(),dm=s.length>=4?DV.filter(d=>d.imei.includes(s)):[],m=P.filter(p=>!s||(p.name+' '+p.sku+' '+(p.barcode||'')).toLowerCase().includes(s));
+$('res').innerHTML=(dm.length?'<div class="mu">Phones matching IMEI</div>'+dm.slice(0,6).map(d=>{const p=P.find(x=>x.id==d.product_id);return `<button class="card w" style="text-align:left;cursor:pointer;color:var(--tx)" onclick="add(${p.id},${d.id})">${h(p.name)} · ${h(d.color||'')}<div class="mu">IMEI ${h(d.imei)}</div></button>`}).join(''):'')+(m.length?'':'<div class="mu">No products found. Add some in Products.</div>')+'<div class="pg">'+m.map(p=>`<button class="card" ${stk(p)?'':'disabled'} onclick="add(${p.id})"><b>${h(p.name)}</b><div class="mu">${h(p.sku)} · Stock ${stk(p)}</div>${R(p.price)}</button>`).join('')+'</div>'}
+function scan(){const s=q.trim().toLowerCase();if(!s)return;const d=DV.find(d=>d.imei==s);if(d)add(d.product_id,d.id);else{const p=P.find(p=>(p.barcode||'').toLowerCase()==s||p.sku.toLowerCase()==s);if(p)add(p.id)}q='';$('s').value='';drawRes()}
+function add(pid,did){const p=P.find(x=>x.id==pid),used=cart.map(l=>l.did);
+if(p.type=='phone'){const d=did?DV.find(x=>x.id==did):DV.find(x=>x.product_id==pid&&!used.includes(x.id));if(!d||used.includes(d.id))return msg('No more phones of this model available.');cart.push({pid,n:p.name,q:1,p:p.price,did:d.id,imei:d.imei})}
+else{const l=cart.find(l=>l.pid==pid);if((l?l.q:0)>=p.stock)return msg('Only '+p.stock+' in stock.');l?l.q++:cart.push({pid,n:p.name,q:1,p:p.price})}drawCart()}
+const wk=()=>C.find(c=>c.id==cust)?.is_walkin,ctot=()=>cart.reduce((a,l)=>a+l.p*l.q,0);
+function drawCart(){const tot=ctot(),pd=wk()||paid===''?tot:Math.max(0,Math.min(+paid,tot));
+$('cart').innerHTML=`<b>Cart</b><div>${cart.map((l,i)=>`<div class="row"><span>${h(l.n)}${l.imei?`<div class="mu">IMEI ${h(l.imei)}</div>`:''}</span><span>${l.q} × ${R(l.p)} <button class="b2" onclick="cart.splice(${i},1);drawCart()">✕</button></span></div>`).join('')||'<div class="mu" style="padding:8px 0">Empty. Tap a product.</div>'}</div>
+<select class="w" onchange="cust=+this.value;drawCart()">${C.map(c=>`<option value="${c.id}" ${c.id==cust?'selected':''}>${h(c.name)}${c.balance>0?' (owes '+R(c.balance)+')':''}</option>`).join('')}</select>
+<div class="row big"><span>Total</span><span>${R(tot)}</span></div>
+${wk()?'<div class="mu">Walk-in customers pay in full. Choose a named customer for credit.</div>':`<input class="w" type="number" min="0" placeholder="Amount paid (blank = full)" value="${h(paid)}" oninput="paid=this.value;$('bal').textContent=R(Math.max(0,${tot}-Math.max(0,this.value===''?${tot}:+this.value)))"><div class="mu">Credit balance: <span id="bal">${R(tot-pd)}</span></div>`}
+<button class="b w" style="margin-top:8px" ${cart.length?'':'disabled'} onclick="done()">Complete sale</button>`}
+async function done(){if(busy)return;if(paid!==''&&+paid<0)return msg('Amount paid cannot be negative.');busy=1;
+try{const tot=ctot(),id=await rpc('complete_sale',{p_customer:cust,p_paid:wk()||paid===''?tot:+paid,p_items:cart.map(l=>({product_id:l.pid,qty:l.q,device_id:l.did||null}))});cart=[];paid='';inv=id;render()}catch(e){}busy=0}
+
+async function invoice(){const s=await db(sb.from('sales').select('*,customers(name,phone),sale_items(*,devices(imei))').eq('id',inv).single()),got=+s.paid+ +s.settled;
+return `<div class="card" style="max-width:560px;margin:auto"><div class="row"><div><div class="big">${h(SHOP)}</div><div class="mu">${h(ADDR)} · Sales invoice</div></div><div style="text-align:right"><b>${h(s.no)}</b><div class="mu">${fd(s.created_at)}</div></div></div>
+<p>Customer: <b>${h(s.customers.name)}</b> <span class="mu">${h(s.customers.phone||'')}</span></p>${tbl(['Item','Qty','Price','Amount'],s.sale_items.map(l=>[h(l.name)+(l.devices?`<div class="mu">IMEI ${h(l.devices.imei)}</div>`:'')+(l.returned_qty?`<div class="mu bad">Returned ${l.returned_qty}</div>`:''),l.qty,R(l.price),R(l.price*l.qty)]))}
+<div style="text-align:right;margin-top:10px">Total <b>${R(s.total)}</b>${+s.returned?`<br>Returned −${R(s.returned)}`:''}<br>Received ${R(got)}<br><b class="${s.balance>0?'bad':'ok'}">Balance ${R(s.balance)}</b></div>
+<div class="row np" style="margin-top:12px"><button class="b" onclick="window.print()">Print</button><button class="b2" onclick="go('${cur=='pos'?'pos':'sales'}')">Back</button></div></div>`}
+
+const PT=[['phone','Phone (tracked by IMEI)'],['accessory','Accessory']];
+const pf=p=>[{k:'name',l:'Name',r:1,v:p?.name},{k:'sku',l:'SKU',r:1,v:p?.sku},...(p?[]:[{k:'type',l:'Type',t:'select',o:PT}]),{k:'cost',l:'Cost price',t:'number',r:1,min:0,v:p?.cost},{k:'price',l:'Selling price',t:'number',r:1,min:0,v:p?.price},{k:'min_stock',l:'Minimum stock',t:'number',min:0,v:p?.min_stock??2},...(p?[]:[{k:'stock',l:'Opening stock (accessories only)',t:'number',min:0,v:0}])];
+async function saveProd(v,id){if(+v.price<+v.cost&&!confirm('Selling price is below cost. Save anyway?'))return 'Cancelled.';const r={name:v.name.trim(),sku:v.sku.trim(),cost:+v.cost,price:+v.price,min_stock:Math.floor(+v.min_stock)||0};
+if(id)await db(sb.from('products').update(r).eq('id',id));else{r.type=v.type;r.stock=v.type=='phone'?0:Math.floor(+v.stock)||0;await db(sb.from('products').insert(r))}}
+const addProd=()=>ask('Add product',pf(),v=>saveProd(v));
+const editProd=id=>ask('Edit product',pf(P.find(p=>p.id==id)),v=>saveProd(v,id));
+const stockIn=id=>ask('Receive stock',[{k:'n',l:'Quantity received',t:'number',r:1,min:1}],async v=>{await rpc('receive_stock',{p_product:id,p_qty:Math.floor(+v.n)})});
+const delProd=async id=>{const p=P.find(x=>x.id==id);if(stk(p)&&!confirm('This product still has stock. Remove anyway?'))return;if(!confirm('Remove '+p.name+' from the active list? History is kept.'))return;await db(sb.from('products').update({active:false}).eq('id',id));render()};
+PG.prod=()=>`<div class="card"><div class="row"><b>Products</b><button class="b" onclick="addProd()">+ Add product</button></div>${tbl(['Name','SKU','Type','Cost','Price','Stock','Barcode',''],P.map(p=>[h(p.name),h(p.sku),p.type,R(p.cost),R(p.price),`<span class="${stk(p)<=p.min_stock?'bad':''}">${stk(p)}</span>`,h(p.barcode||'—'),`<button class="b2" onclick="editProd(${p.id})">Edit</button> ${p.type=='accessory'?`<button class="b2" onclick="stockIn(${p.id})">+ Stock</button> `:''}<button class="b2" onclick="delProd(${p.id})">Remove</button>`]))}</div>`;
+
+const addDev=()=>{const ph=P.filter(p=>p.type=='phone');if(!ph.length)return msg('Add a phone product first (Products, type Phone).');
+ask('Register phone',[{k:'pid',l:'Model',t:'select',o:ph.map(p=>[p.id,p.name])},{k:'imei',l:'IMEI (15 digits)',r:1},{k:'color',l:'Colour'}],async v=>{const im=v.imei.trim();if(!/^\d{15}$/.test(im))return 'IMEI must be exactly 15 digits.';if(!luhn(im)&&!confirm('This IMEI fails the checksum test, so it may have a typo. Save anyway?'))return 'Cancelled.';await db(sb.from('devices').insert({product_id:+v.pid,imei:im,color:v.color.trim()||null}))})};
+PG.dev=async()=>{const d=await db(sb.from('devices').select('*,products(name),sales(no)').order('id',{ascending:false}).limit(500));
+return `<div class="card"><div class="row"><b>Phones – one row per IMEI</b>${can('manager')?'<button class="b" onclick="addDev()">+ Register phone</button>':''}</div>${tbl(['Model','IMEI','Colour','Status','Invoice'],d.map(x=>[h(x.products.name),h(x.imei),h(x.color||''),`<span class="${x.status=='in_stock'?'ok':'mu'}">${x.status.replace('_',' ')}</span>`,h(x.sales?.no||'—')]))}</div>`};
+
+const addCust=()=>ask('Add customer',[{k:'name',l:'Name',r:1},{k:'phone',l:'Phone'}],async v=>{await db(sb.from('customers').insert({name:v.name.trim(),phone:v.phone.trim()||null}))});
+const editCust=id=>{const c=C.find(x=>x.id==id);ask('Edit customer',[{k:'name',l:'Name',r:1,v:c.name},{k:'phone',l:'Phone',v:c.phone}],async v=>{await db(sb.from('customers').update({name:v.name.trim(),phone:v.phone.trim()||null}).eq('id',id))})};
+const recv=id=>{const c=C.find(x=>x.id==id);ask('Receive payment – '+c.name+' owes '+R(c.balance),[{k:'a',l:'Amount received (Rs.)',t:'number',r:1,min:1,v:c.balance}],async v=>{if(+v.a>c.balance)return 'More than the customer owes.';await rpc('receive_payment',{p_customer:id,p_amount:+v.a})})};
+PG.cust=()=>`<div class="card"><div class="row"><b>Customers</b><button class="b" onclick="addCust()">+ Add customer</button></div>${tbl(['Name','Phone','Outstanding',''],C.map(c=>[h(c.name),h(c.phone||'—'),`<span class="${c.balance>0?'bad':''}">${R(c.balance)}</span>`,c.is_walkin?'':`<button class="b2" onclick="editCust(${c.id})">Edit</button> ${c.balance>0?`<button class="b2" onclick="recv(${c.id})">Receive payment</button>`:''}`]))}</div>`;
+PG.sales=async()=>{const s=await db(sb.from('sales').select('id,no,total,paid,settled,returned,balance,created_at,customers(name)').order('id',{ascending:false}).limit(200));
+return `<div class="card"><b>Sales</b> <span class="mu">(latest 200)</span>${tbl(['Invoice','Date','Customer','Total','Received','Balance',''],s.map(x=>[h(x.no),fd(x.created_at),h(x.customers.name),R(x.total-x.returned),R(+x.paid+ +x.settled),`<span class="${x.balance>0?'bad':''}">${R(x.balance)}</span>`,`<button class="b2" onclick="inv=${x.id};render()">Open</button>`]))}</div>`};
+
+const addExp=()=>ask('Add expense',[{k:'category',l:'Category',t:'select',o:['rent','salaries','utilities','internet','transport','maintenance','miscellaneous'].map(x=>[x,x])},{k:'amount',l:'Amount (Rs.)',t:'number',r:1,min:1},{k:'description',l:'Description'}],async v=>{await db(sb.from('expenses').insert({category:v.category,amount:+v.amount,description:v.description}))});
+const openReg=()=>ask('Open cash register',[{k:'o',l:'Opening cash in drawer (Rs.)',t:'number',min:0,v:0,r:1}],async v=>{await rpc('open_register',{p_open:+v.o})});
+const cashMove=()=>ask('Cash in / out',[{k:'d',l:'Direction',t:'select',o:[['in','Cash in'],['out','Cash out']]},{k:'a',l:'Amount (Rs.)',t:'number',r:1,min:1},{k:'w',l:'Reason (required)',r:1}],async v=>{await rpc('cash_move',{p_dir:v.d,p_amount:+v.a,p_why:v.w})});
+const closeReg=e=>ask('Close register (expected '+R(e)+')',[{k:'c',l:'Counted cash (Rs.)',t:'number',r:1,min:0},{k:'n',l:'Explanation (required if different)'}],async v=>{await rpc('close_register',{p_counted:+v.c,p_note:v.n})});
+PG.fin=async()=>{const f=from(),[s,ex,reg,hist]=await Promise.all([rpc('summary',{p_from:f}),db(sb.from('expenses').select('*').gte('created_at',f).order('id',{ascending:false}).limit(200)),db(sb.from('cash_sessions').select('*').eq('status','open').maybeSingle()),db(sb.from('cash_sessions').select('*').eq('status','closed').order('id',{ascending:false}).limit(5))]);
+const exp=reg?await rpc('cash_expected'):0,net=s.gross-s.returns,gp=net-s.cogs;
+return `<div class="row"><b>Period</b><select onchange="fper=this.value;render()">${[['day','Today'],['month','This month'],['all','All time']].map(x=>`<option value="${x[0]}" ${fper==x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div>
+<div class="g">${st('Net sales',R(net))}${st('Cost of goods sold',R(s.cogs))}${st('Gross profit',R(gp),'ok')}${st('Operating expenses',R(s.expenses))}${st('Net profit',R(gp-s.expenses),gp-s.expenses<0?'bad':'ok')}${st('Cash received',R(s.cash_in))}${st('Customers owe',R(s.receivables),'bad')}${st('Invoices',s.sales)}</div>
+<div class="g2"><div class="card"><div class="row"><b>Expenses</b><button class="b" onclick="addExp()">+ Add</button></div>${tbl(['Date','Category','Description','Amount'],ex.map(e=>[fd(e.created_at),h(e.category),h(e.description||''),R(e.amount)]))}</div>
+<div class="card"><b>Cash register</b>${reg?`<p>Open since ${fd(reg.opened_at)} · opening ${R(reg.opening)}<br>Expected in drawer: <b>${R(exp)}</b></p><div class="row"><button class="b2" onclick="cashMove()">Cash in/out</button><button class="b" onclick="closeReg(${exp})">Close register</button></div>`:'<p class="mu">Register is closed.</p><button class="b" onclick="openReg()">Open register</button>'}${hist.length?tbl(['Closed','Expected','Counted','Diff','Note'],hist.map(r=>[fd(r.closed_at),R(r.expected),R(r.counted),`<span class="${r.diff?'bad':''}">${R(r.diff)}</span>`,h(r.note||'')])):''}</div></div>`};
+
+PG.ret=async()=>{const n=rno.trim().toUpperCase(),s=n?await db(sb.from('sales').select('*,sale_items(*,devices(imei))').eq('no',n).maybeSingle()):null,rets=await db(sb.from('returns').select('*,sales(no)').order('id',{ascending:false}).limit(20));
+return `<div class="card"><b>Returns & Refunds</b><p class="mu">Resellable items go back to stock; defective items stay out. Unpaid balance is cancelled first, the rest is paid out.</p><div class="row" style="justify-content:flex-start"><input id="rn" placeholder="INV-00003" value="${h(rno)}"><button class="b" onclick="rno=$('rn').value;rs={};render()">Find invoice</button></div>${n&&!s?'<div class="mu">No invoice with that number.</div>':''}
+${s?`<p>Invoice <b>${h(s.no)}</b> · Total ${R(s.total)} · Received ${R(+s.paid+ +s.settled)} · Balance ${R(s.balance)}</p>${tbl(['Item','Sold','Returned','Return qty','Condition'],s.sale_items.map(l=>{const left=l.qty-l.returned_qty;return [h(l.name)+(l.devices?`<div class="mu">IMEI ${h(l.devices.imei)}</div>`:''),l.qty,l.returned_qty,left?`<input type="number" min="0" max="${left}" style="width:70px" value="${(rs[l.id]||{}).q||0}" onchange="rs[${l.id}]={...rs[${l.id}],q:Math.min(${left},Math.max(0,Math.floor(+this.value)))};this.value=rs[${l.id}].q">`:'Fully returned',left?`<select onchange="rs[${l.id}]={...rs[${l.id}],c:this.value}"><option value="">Select…</option><option value="resellable">Resellable</option><option value="defective">Defective</option></select>`:'']}))}
+<input class="w" id="rr" placeholder="Reason (required)" value="${h(rrea)}" oninput="rrea=this.value"><button class="b" onclick="doRet(${s.id})">Authorize & process return</button>`:''}</div>
+${rets.length?`<div class="card"><b>Recent returns</b>${tbl(['Return','Invoice','Value','Debt cancelled','Paid out','Reason'],rets.map(r=>[h(r.no),h(r.sales.no),R(r.value),R(r.debt_cancelled),R(r.paid_out),h(r.reason)]))}</div>`:''}`};
+async function doRet(sid){const it=Object.entries(rs).filter(([i,v])=>v.q>0);if(!it.length)return msg('Select at least one item and quantity.');if(it.some(([i,v])=>!v.c))return msg('Choose the condition of every returned item.');if(!rrea.trim())return msg('A return reason is required.');if(busy)return;busy=1;
+try{await rpc('process_return',{p_sale:sid,p_items:it.map(([i,v])=>({sale_item_id:+i,qty:v.q,cond:v.c})),p_reason:rrea});rs={};rrea='';msg('Return processed.');render()}catch(e){}busy=0}
+
+PG.bar=()=>!P.length?'<div class="card mu">Add products first, then create barcodes here.</div>':`<div class="card np"><div class="row"><b>Barcodes & labels</b><span><button class="b2" onclick="P.forEach(p=>sel[p.id]=1);render()">Select all</button> <button class="b2" onclick="mkBc()">Create barcodes</button> <button class="b" onclick="window.print()">Print labels</button></span></div>
+${P.map(p=>`<label style="display:flex;gap:8px;align-items:center;border-top:1px solid var(--bd);padding:6px 0;margin:0"><input type="checkbox" ${sel[p.id]?'checked':''} onchange="sel[${p.id}]=this.checked;render()"><span style="flex:1;color:var(--tx);font-size:14px">${h(p.name)}<span class="mu" style="display:block">${h(p.sku)} · ${h(p.barcode||'no barcode yet')}</span></span></label>`).join('')}</div>
+<div class="row" style="justify-content:flex-start;align-items:flex-start">${P.filter(p=>sel[p.id]&&p.barcode).map(p=>`<div class="lab"><div class="mu" style="color:#000">${h(p.name)}</div><svg class="jb" data-c="${h(p.barcode)}"></svg><div class="mu" style="color:#000">${h(p.sku)} · ${R(p.price)}</div></div>`).join('')}</div>`;
+async function mkBc(){const ids=P.filter(p=>sel[p.id]).map(p=>p.id),t=ids.length?ids:P.map(p=>p.id);if(!ids.length)P.forEach(p=>sel[p.id]=1);const n=await rpc('assign_barcodes',{p_ids:t});msg(n?n+' barcode(s) created.':'All selected products already have barcodes.');render()}
+
+PG.reo=()=>{const r=P.filter(p=>stk(p)<=p.min_stock).map(p=>({p,q:Math.max(0,p.min_stock*2-stk(p))}));
+return `<div class="card"><b>Reorder suggestions</b><p class="mu">Suggestions only. Nothing is ordered or paid automatically.</p>${r.length?tbl(['Product','In stock','Min','Suggested order','Est. cost'],r.map(x=>[h(x.p.name),stk(x.p),x.p.min_stock,x.q,R(x.q*x.p.cost)])):'<div class="mu">Nothing is below minimum stock.</div>'}</div>`};
+
+PG.adm=async()=>{const tabs=[['ov','Overview'],['us','Users & roles'],['au','Audit log'],['ex','Data export']];let b='';
+if(atab=='ov'){const s=await rpc('summary',{p_from:new Date(2000,0,1).toISOString()});b=`<div class="g">${st('Invoices',s.sales)}${st('Sales value',R(s.gross))}${st('Returns value',R(s.returns))}${st('Expenses',R(s.expenses))}${st('Active products',P.length)}${st('Phones in stock',DV.length)}${st('Customers',C.length-1)}${st('Receivables',R(s.receivables))}</div>`}
+if(atab=='us'){const u=await db(sb.from('profiles').select('*').order('created_at'));b=`<div class="card">${tbl(['User','Role','Access'],u.map(x=>[h(x.email),x.id==me.id?'admin':`<select onchange="setU('${x.id}',{role:this.value})">${['admin','manager','cashier'].map(r=>`<option ${x.role==r?'selected':''}>${r}</option>`).join('')}</select>`,x.id==me.id?'You':`<button class="${x.active?'b2':'b'}" onclick="setU('${x.id}',{active:${!x.active}})">${x.active?'Deactivate':'Approve'}</button>`]))}</div>`}
+if(atab=='au'){const a=await db(sb.from('audit_log').select('*,profiles(email)').order('id',{ascending:false}).limit(200));b=`<div class="card">${tbl(['When','User','Action','Record','Detail'],a.map(x=>[fd(x.at),h(x.profiles?.email||'—'),h(x.action),h(x.entity),`<span class="mu">${h(x.detail||'')}</span>`]))}</div>`}
+if(atab=='ex')b=`<div class="card"><p class="mu">Download a CSV of any table.</p><div class="row" style="justify-content:flex-start">${['products','customers','sales','sale_items','expenses','devices','returns'].map(n=>`<button class="b2" onclick="dl('${n}')">${n}</button>`).join('')}</div></div>`;
+return `<div class="card" style="background:#0a0a0a;padding:6px">${tabs.map(([k,l])=>`<button class="tab" style="${atab==k?'background:#f4f1ea;color:#000':'color:#f4f1ea99'}" onclick="atab='${k}';render()">${l}</button>`).join('')}</div>${b}`};
+async function setU(id,v){await db(sb.from('profiles').update(v).eq('id',id));render()}
+async function dl(t){const d=await db(sb.from(t).select('*').limit(50000));if(!d.length)return msg('Nothing to export yet.');const k=Object.keys(d[0]),e=x=>'"'+String(x??'').replace(/^[=+\-@]/,"'$&").replace(/"/g,'""')+'"';
+const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([[k.join(','),...d.map(r=>k.map(c=>e(r[c])).join(','))].join('\n')],{type:'text/csv'}));a.download=t+'.csv';a.click()}
+
+if(SB_URL.startsWith('PASTE')||!window.supabase)$('root').innerHTML='<div class="card"><b>Setup needed</b><p>Open <code>index.html</code> in a text editor and paste your Supabase Project URL and anon key at the top of the script. Then reload. (Also check your internet connection: the Supabase library loads from a CDN.)</p></div>';
+else{sb=supabase.createClient(SB_URL,SB_KEY);boot()}
+</script></body></html>
+
+
